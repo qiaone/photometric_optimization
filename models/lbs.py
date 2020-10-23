@@ -316,7 +316,7 @@ def transform_mat(R, t):
     '''
     # No padding left or right, only add an extra row
     return torch.cat([F.pad(R, [0, 0, 0, 1]),
-                      F.pad(t, [0, 0, 0, 1], value=1)], dim=2)
+                      F.pad(t, [0, 0, 0, 1], value=1)], dim=3)
 
 
 def batch_rigid_transform(rot_mats, joints, parents, dtype=torch.float32):
@@ -349,8 +349,8 @@ def batch_rigid_transform(rot_mats, joints, parents, dtype=torch.float32):
     rel_joints[:, 1:] -= joints[:, parents[1:]]
 
     transforms_mat = transform_mat(
-        rot_mats.view(-1, 3, 3),
-        rel_joints.view(-1, 3, 1)).view(-1, joints.shape[1], 4, 4)
+       rot_mats.view(-1, joints.shape[1], 3, 3),
+       rel_joints.view(-1, joints.shape[1], 3, 1)).view(-1, joints.shape[1], 4, 4)
 
     transform_chain = [transforms_mat[:, 0]]
     for i in range(1, parents.shape[0]):
