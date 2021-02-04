@@ -15,6 +15,7 @@ from FLAME import FLAME, FLAMETex
 from renderer import Renderer
 import util
 torch.backends.cudnn.benchmark = True
+import pdb
 
 
 class PhotometricFitting(object):
@@ -31,7 +32,7 @@ class PhotometricFitting(object):
 
     def _setup_renderer(self):
         mesh_file = './data/head_template_mesh.obj'
-        self.render = Renderer(self.image_size, obj_filename=mesh_file).to(self.device)
+        self.render = Renderer(self.image_size, obj_filename=mesh_file, config=self.config).to(self.device)
 
     def optimize(self, images, landmarks, image_masks, savefolder=None):
         bz = images.shape[0]
@@ -228,9 +229,11 @@ if __name__ == '__main__':
     device_name = str(sys.argv[2])
     config = {
         # FLAME
-        'flame_model_path': './data/generic_model.pkl',  # acquire it from FLAME project page
+        #'flame_model_path': './data/generic_model.pkl',  # acquire it from FLAME project page
+        'flame_model_path': '../GIF/FLAME/models/generic_model.pkl',  # acquire it from FLAME project page
         'flame_lmk_embedding_path': './data/landmark_embedding.npy',
-        'tex_space_path': './data/FLAME_texture.npz',  # acquire it from FLAME project page
+        #'tex_space_path': './data/FLAME_texture.npz',  # acquire it from FLAME project page
+        'tex_space_path': '../FLAME_texture.npz',  # acquire it from FLAME project page
         'camera_params': 3,
         'shape_params': 100,
         'expression_params': 50,
@@ -250,6 +253,7 @@ if __name__ == '__main__':
         'w_shape_reg': 1e-4,
         'w_expr_reg': 1e-4,
         'w_pose_reg': 0,
+        'trim_path': "./data/trim_verts_face.npz"
     }
 
     config = util.dict2obj(config)

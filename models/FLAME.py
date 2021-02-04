@@ -4,6 +4,7 @@ Copyright (c) 2019, Soubhik Sanyal
 All rights reserved.
 """
 # Modified from smplx code for FLAME
+import pdb
 import torch
 import torch.nn as nn
 import numpy as np
@@ -46,24 +47,24 @@ class FLAME(nn.Module):
             # flame_model = Struct(**pickle.load(f, encoding='latin1'))
             ss = pickle.load(f, encoding='latin1')
             flame_model = Struct(**ss)
-
+        tp = np.load(config.trim_path, allow_pickle=True)
         self.dtype = torch.float32
-        self.register_buffer('faces_tensor', to_tensor(to_np(flame_model.f, dtype=np.int64), dtype=torch.long))
+        self.register_buffer('faces_tensor', to_tensor(to_np(tp['map_verts'][flame_model.f[tp['idx_faces']]].copy(), dtype=np.int64), dtype=torch.long))
         # The vertices of the template model
-        self.register_buffer('v_template', to_tensor(to_np(flame_model.v_template), dtype=self.dtype))
+        self.register_buffer('v_template', to_tensor(to_np(flame_model.v_template[tp['idx_verts']].copy()), dtype=self.dtype))
         # The shape components and expression
-        shapedirs = to_tensor(to_np(flame_model.shapedirs), dtype=self.dtype)
+        shapedirs = to_tensor(to_np(flame_model.shapedirs[tp['idx_verts']].copy()), dtype=self.dtype)
         shapedirs = torch.cat([shapedirs[:,:,:config.shape_params], shapedirs[:,:,300:300+config.expression_params]], 2)
         self.register_buffer('shapedirs', shapedirs)
         # The pose components
         num_pose_basis = flame_model.posedirs.shape[-1]
-        posedirs = np.reshape(flame_model.posedirs, [-1, num_pose_basis]).T
+        posedirs = np.reshape(flame_model.posedirs[tp['idx_verts']].copy(), [-1, num_pose_basis]).T
         self.register_buffer('posedirs', to_tensor(to_np(posedirs), dtype=self.dtype))
         # 
-        self.register_buffer('J_regressor', to_tensor(to_np(flame_model.J_regressor), dtype=self.dtype))
+        self.register_buffer('J_regressor', to_tensor(to_np(flame_model.J_regressor[:,tp['idx_verts']].copy()), dtype=self.dtype))
         parents = to_tensor(to_np(flame_model.kintree_table[0])).long(); parents[0] = -1
         self.register_buffer('parents', parents)
-        self.register_buffer('lbs_weights', to_tensor(to_np(flame_model.weights), dtype=self.dtype))
+        self.register_buffer('lbs_weights', to_tensor(to_np(flame_model.weights[tp['idx_verts']].copy()), dtype=self.dtype))
 
         # Fixing Eyeball and neck rotation
         default_eyball_pose = torch.zeros([1, 6], dtype=self.dtype, requires_grad=False)
@@ -76,12 +77,23 @@ class FLAME(nn.Module):
         # Static and Dynamic Landmark embeddings for FLAME
         lmk_embeddings = np.load(config.flame_lmk_embedding_path, allow_pickle=True, encoding='latin1')
         lmk_embeddings = lmk_embeddings[()]
-        self.register_buffer('lmk_faces_idx', torch.tensor(lmk_embeddings['static_lmk_faces_idx'], dtype=torch.long))
-        self.register_buffer('lmk_bary_coords', torch.tensor(lmk_embeddings['static_lmk_bary_coords'], dtype=self.dtype))
-        self.register_buffer('dynamic_lmk_faces_idx', torch.tensor(lmk_embeddings['dynamic_lmk_faces_idx'], dtype=torch.long))
+        self.register_buffer('lmk_faces_idx', torch.tensor(
+            tp['map_faces'][lmk_embeddings['static_lmk_faces_idx']].copy(), 
+            dtype=torch.long))
+        self.register_buffer('lmk_bary_coords', torch.tensor(
+            lmk_embeddings['static_lmk_bary_coords'], 
+            dtype=self.dtype))
+        self.register_buffer('dynamic_lmk_faces_idx', torch.tensor(
+            tp['map_faces'][lmk_embeddings['dynamic_lmk_faces_idx']].copy(), 
+            dtype=torch.long))
         self.register_buffer('dynamic_lmk_bary_coords', torch.tensor(lmk_embeddings['dynamic_lmk_bary_coords'], dtype=self.dtype))
-        self.register_buffer('full_lmk_faces_idx', torch.tensor(lmk_embeddings['full_lmk_faces_idx'], dtype=torch.long))
+        self.register_buffer('full_lmk_faces_idx', torch.tensor(
+            tp['map_faces'][lmk_embeddings['full_lmk_faces_idx']].copy(), 
+            dtype=torch.long))
         self.register_buffer('full_lmk_bary_coords', torch.tensor(lmk_embeddings['full_lmk_bary_coords'], dtype=self.dtype))
+
+        #np.save("../static_lmk.npy", lmk_embeddings['static_lmk_faces_idx'])
+        #np.save("../dynamic_lmk.npy", lmk_embeddings['dynamic_lmk_faces_idx'])
 
         neck_kin_chain = []; NECK_IDX=1
         curr_idx = torch.tensor(NECK_IDX, dtype=torch.long)
@@ -225,7 +237,7 @@ class FLAMETex(nn.Module):
     def __init__(self, config):
         super(FLAMETex, self).__init__()
         tex_params = config.tex_params
-        tex_space = np.load(config.tex_space_path)
+        tex_space = np.load(config.tex_space_path, allow_pickle=True)
         texture_mean = tex_space['mean'].reshape(1, -1)
         texture_basis = tex_space['tex_dir'].reshape(-1, 200)
         num_components = texture_basis.shape[1]

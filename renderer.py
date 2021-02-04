@@ -12,6 +12,7 @@ from pytorch3d.structures import Meshes
 from pytorch3d.io import load_obj
 from pytorch3d.renderer.mesh import rasterize_meshes
 import util
+import pdb
 
 
 class Pytorch3dRasterizer(nn.Module):
@@ -85,7 +86,7 @@ class Pytorch3dRasterizer(nn.Module):
 
 
 class Renderer(nn.Module):
-    def __init__(self, image_size, obj_filename, uv_size=256):
+    def __init__(self, image_size, obj_filename, uv_size=256, config=None):
         super(Renderer, self).__init__()
         self.image_size = image_size
         self.uv_size = uv_size
@@ -94,6 +95,15 @@ class Renderer(nn.Module):
         uvcoords = aux.verts_uvs[None, ...]  # (N, V, 2)
         uvfaces = faces.textures_idx[None, ...]  # (N, F, 3)
         faces = faces.verts_idx[None, ...]
+        if config is not None:
+            _tp = np.load(config.trim_path, allow_pickle=True)
+            tp = {}
+            for k in _tp.keys():
+                tp[k] = torch.LongTensor(_tp[k])
+            verts = verts[tp['idx_verts']]
+            #uvcoords = uvcoords[:,tp['idx_verts']]
+            uvfaces = uvfaces[:,tp['idx_faces']]
+            faces = tp['map_verts'][faces[:,tp['idx_faces']]]
         self.rasterizer = Pytorch3dRasterizer(image_size)
         self.uv_rasterizer = Pytorch3dRasterizer(uv_size)
 

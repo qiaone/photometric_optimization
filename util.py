@@ -7,6 +7,7 @@ import os
 from scipy.ndimage import morphology
 from skimage.io import imsave
 import cv2
+import pdb
 
 
 def dict2obj(d):
