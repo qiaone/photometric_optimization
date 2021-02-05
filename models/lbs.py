@@ -324,7 +324,7 @@ def blbs(shape_params, expression_params, pose, v_template, shapedirs, posedirs,
     return verts, J_transformed
 
 
-def lbs(betas, pose, v_template, shapedirs, posedirs, J_regressor, parents,
+def lbs(shape_params, expression_params, pose, v_template, shapedirs, posedirs, J_regressor, parents,
         lbs_weights, pose2rot=True, dtype=torch.float32):
     ''' Performs Linear Blend Skinning with the given shape and pose parameters
 
@@ -363,6 +363,7 @@ def lbs(betas, pose, v_template, shapedirs, posedirs, J_regressor, parents,
         joints: torch.tensor BxJx3
             The joints of the model
     '''
+    betas = torch.cat([shape_params, expression_params], dim=1)
 
     batch_size = max(betas.shape[0], pose.shape[0])
     device = betas.device

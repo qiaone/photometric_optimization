@@ -27,7 +27,10 @@ class PhotometricFitting(object):
         #
         self.flame = FLAME(self.config).to(self.device)
         self.flametex = FLAMETex(self.config).to(self.device)
-        shape_prior = np.load(config.shape_factors_path)
+        if config.model_name == 'flame':
+            shape_prior = np.zeros((1, self.config.shape_params))
+        else:
+            shape_prior = np.load(config.shape_factors_path)
         self.shape_prior = torch.Tensor(shape_prior.mean(0, keepdims=True))
 
         self._setup_renderer()
@@ -38,12 +41,15 @@ class PhotometricFitting(object):
 
     def optimize(self, images, landmarks, image_masks, savefolder=None):
         bz = images.shape[0]
-        shape = self.shape_prior.expand(bz, -1).float().to(self.device)
+        if self.config.model_name == 'flame':
+            shape = nn.Parameter(torch.zeros(bz, self.config.shape_params).float().to(self.device))
+        else:
+            shape = self.shape_prior.expand(bz, -1).float().to(self.device)
         shape = nn.Parameter(shape)
         tex = nn.Parameter(torch.zeros(bz, self.config.tex_params).float().to(self.device))
         exp = nn.Parameter(torch.zeros(bz, self.config.expression_params).float().to(self.device))
         pose = nn.Parameter(torch.zeros(bz, self.config.pose_params).float().to(self.device))
-        cam = torch.zeros(bz, self.config.camera_params); cam[:, 0] = 0.5
+        cam = torch.zeros(bz, self.config.camera_params); cam[:, 0] = self.config.cam_prior
         cam = nn.Parameter(cam.float().to(self.device))
         lights = nn.Parameter(torch.zeros(bz, 9, 3).float().to(self.device))
         e_opt = torch.optim.Adam(
@@ -63,9 +69,8 @@ class PhotometricFitting(object):
         # this is due to the non-differentiable attribute of contour landmarks trajectory
         for k in range(200):
             losses = {}
-            p = torch.cat((pose, torch.zeros_like(pose)), 1)
-            e = torch.cat((torch.ones_like(exp[:,:1]), exp), 1)
-            vertices, landmarks2d, landmarks3d = self.flame(shape_params=shape, expression_params=e, pose_params=p)
+            p, e, s = self.config.prep_param(pose, exp, shape)
+            vertices, landmarks2d, landmarks3d = self.flame(shape_params=s, expression_params=e, pose_params=p)
             trans_vertices = util.batch_orth_proj(vertices, cam);
             trans_vertices[..., 1:] = - trans_vertices[..., 1:]
             landmarks2d = util.batch_orth_proj(landmarks2d, cam);
@@ -82,6 +87,7 @@ class PhotometricFitting(object):
             e_opt_rigid.zero_grad()
             all_loss.backward()
             e_opt_rigid.step()
+            self.config.post_param(pose, exp, shape)
 
             loss_info = '----iter: {}, time: {}\n'.format(k, datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S'))
             for key in losses.keys():
@@ -108,9 +114,8 @@ class PhotometricFitting(object):
         # non-rigid fitting of all the parameters with 68 face landmarks, photometric loss and regularization terms.
         for k in range(200, 1000):
             losses = {}
-            p = torch.cat((pose, torch.zeros_like(pose)), 1)
-            e = torch.cat((torch.ones_like(exp[:,:1]), exp), 1)
-            vertices, landmarks2d, landmarks3d = self.flame(shape_params=shape, expression_params=e, pose_params=p)
+            p, e, s = self.config.prep_param(pose, exp, shape)
+            vertices, landmarks2d, landmarks3d = self.flame(shape_params=s, expression_params=e, pose_params=p)
             trans_vertices = util.batch_orth_proj(vertices, cam);
             trans_vertices[..., 1:] = - trans_vertices[..., 1:]
             landmarks2d = util.batch_orth_proj(landmarks2d, cam);
@@ -136,7 +141,7 @@ class PhotometricFitting(object):
             e_opt.zero_grad()
             all_loss.backward()
             e_opt.step()
-            exp.data = torch.clamp(exp.data, 0, 1)
+            self.config.post_param(pose, exp, shape)
 
             loss_info = '----iter: {}, time: {}\n'.format(k, datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S'))
             for key in losses.keys():
@@ -233,39 +238,18 @@ class PhotometricFitting(object):
 
 
 if __name__ == '__main__':
+    import importlib
+    import torch
     image_name = str(sys.argv[1])
     device_name = str(sys.argv[2])
-    config = {
-        # FLAME
-        #'flame_model_path': './data/generic_model.pkl',  # acquire it from FLAME project page
-        'flame_model_path': '../GIF/FLAME/models/generic_model.pkl',  # acquire it from FLAME project page
-        'bs_model_path': './data/fwh_corealign_50_47_2flame.npy',  # acquire it from FLAME project page
-        'shape_factors_path': './data/fwh_factorsalign_150_50_2flame.npy',
+    if len(sys.argv)>3:
+        model_name = str(sys.argv[3])
+    else:
+        model_name = 'flame'
 
-        'flame_lmk_embedding_path': './data/landmark_embedding.npy',
-        #'tex_space_path': './data/FLAME_texture.npz',  # acquire it from FLAME project page
-        'tex_space_path': '../FLAME_texture.npz',  # acquire it from FLAME project page
-        'camera_params': 3,
-        'shape_params': 50,
-        'expression_params': 46,
-        'pose_params': 3,
-        'tex_params': 50,
-        'use_face_contour': True,
-
-        'cropped_size': 256,
-        'batch_size': 1,
-        'image_size': 224,
-        'e_lr': 0.005,
-        'e_wd': 0.0001,
-        'savefolder': './test_results/',
-        # weights of losses and reg terms
-        'w_pho': 8,
-        'w_lmks': 1,
-        'w_shape_reg': 1e-1,
-        'w_expr_reg': 1e-2,
-        'w_pose_reg': 0,
-        'trim_path': "./data/trim_verts_face.npz"
-    }
+    model_filename = "conf." + model_name
+    modellib = importlib.import_module(model_filename)
+    config = modellib.config
 
     config = util.dict2obj(config)
     util.check_mkdir(config.savefolder)

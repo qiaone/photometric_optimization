@@ -11,7 +11,7 @@ import numpy as np
 import pickle
 import torch.nn.functional as F
 
-from lbs import lbs, batch_rodrigues, vertices2landmarks, blbs
+from lbs import batch_rodrigues, vertices2landmarks
 
 def to_tensor(array, dtype=torch.float32):
     if 'torch.tensor' not in str(type(array)):
@@ -47,18 +47,21 @@ class FLAME(nn.Module):
             # flame_model = Struct(**pickle.load(f, encoding='latin1'))
             ss = pickle.load(f, encoding='latin1')
             flame_model = Struct(**ss)
+        self.param2verts = config.param2verts
         tp = np.load(config.trim_path, allow_pickle=True)
         self.dtype = torch.float32
         self.register_buffer('faces_tensor', to_tensor(to_np(tp['map_verts'][flame_model.f[tp['idx_faces']]].copy(), dtype=np.int64), dtype=torch.long))
         # The vertices of the template model
         self.register_buffer('v_template', to_tensor(to_np(flame_model.v_template[tp['idx_verts']].copy()), dtype=self.dtype))
         # The shape components and expression
-        #shapedirs = to_tensor(to_np(flame_model.shapedirs[tp['idx_verts']].copy()), dtype=self.dtype)
-        #shapedirs = torch.cat([shapedirs[:,:,:config.shape_params], shapedirs[:,:,300:300+config.expression_params]], 2)
-        shapedirs = np.load(config.bs_model_path).transpose((2, 1, 0))
-        for i in range(46):
-            shapedirs[:, i + 1, :] = shapedirs[:, i + 1, :] - shapedirs[:, 0, :]
-        shapedirs = torch.Tensor(shapedirs)
+        if config.model_name == 'flame':
+            shapedirs = to_tensor(to_np(flame_model.shapedirs[tp['idx_verts']].copy()), dtype=self.dtype)
+            shapedirs = torch.cat([shapedirs[:,:,:config.shape_params], shapedirs[:,:,300:300+config.expression_params]], 2)
+        else:
+            shapedirs = np.load(config.bs_model_path).transpose((2, 1, 0))
+            shapedirs[:,1:,:] = shapedirs[:,1:,:]-shapedirs[:,:1,:]
+            shapedirs = torch.Tensor(shapedirs)
+
         self.register_buffer('shapedirs', shapedirs)
         # The pose components
         num_pose_basis = flame_model.posedirs.shape[-1]
@@ -201,16 +204,15 @@ class FLAME(nn.Module):
         batch_size = shape_params.shape[0]
         if eye_pose_params is None:
             eye_pose_params = self.eye_pose.expand(batch_size, -1)
-        betas = torch.cat([shape_params, expression_params], dim=1)
         full_pose = torch.cat([pose_params[:, :3], self.neck_pose.expand(batch_size, -1), pose_params[:, 3:], eye_pose_params], dim=1)
         template_vertices = self.v_template.unsqueeze(0).expand(batch_size, -1, -1)
 
         # import ipdb; ipdb.set_trace()
-        #vertices, _ = lbs(betas, full_pose, template_vertices,
+        #vertices, _ = lbs(shape_params, expression_params, full_pose, template_vertices,
         #                  self.shapedirs, self.posedirs,
         #                  self.J_regressor, self.parents,
         #                  self.lbs_weights, dtype=self.dtype)
-        vertices, _ = blbs(shape_params, expression_params, full_pose, template_vertices,
+        vertices, _ = self.param2verts(shape_params, expression_params, full_pose, template_vertices,
                           self.shapedirs, self.posedirs,
                           self.J_regressor, self.parents,
                           self.lbs_weights, dtype=self.dtype)
