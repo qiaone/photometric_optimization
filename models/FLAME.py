@@ -11,7 +11,7 @@ import numpy as np
 import pickle
 import torch.nn.functional as F
 
-from lbs import lbs, batch_rodrigues, vertices2landmarks
+from lbs import lbs, batch_rodrigues, vertices2landmarks, blbs
 
 def to_tensor(array, dtype=torch.float32):
     if 'torch.tensor' not in str(type(array)):
@@ -53,8 +53,12 @@ class FLAME(nn.Module):
         # The vertices of the template model
         self.register_buffer('v_template', to_tensor(to_np(flame_model.v_template[tp['idx_verts']].copy()), dtype=self.dtype))
         # The shape components and expression
-        shapedirs = to_tensor(to_np(flame_model.shapedirs[tp['idx_verts']].copy()), dtype=self.dtype)
-        shapedirs = torch.cat([shapedirs[:,:,:config.shape_params], shapedirs[:,:,300:300+config.expression_params]], 2)
+        #shapedirs = to_tensor(to_np(flame_model.shapedirs[tp['idx_verts']].copy()), dtype=self.dtype)
+        #shapedirs = torch.cat([shapedirs[:,:,:config.shape_params], shapedirs[:,:,300:300+config.expression_params]], 2)
+        shapedirs = np.load(config.bs_model_path).transpose((2, 1, 0))
+        for i in range(46):
+            shapedirs[:, i + 1, :] = shapedirs[:, i + 1, :] - shapedirs[:, 0, :]
+        shapedirs = torch.Tensor(shapedirs)
         self.register_buffer('shapedirs', shapedirs)
         # The pose components
         num_pose_basis = flame_model.posedirs.shape[-1]
@@ -202,7 +206,11 @@ class FLAME(nn.Module):
         template_vertices = self.v_template.unsqueeze(0).expand(batch_size, -1, -1)
 
         # import ipdb; ipdb.set_trace()
-        vertices, _ = lbs(betas, full_pose, template_vertices,
+        #vertices, _ = lbs(betas, full_pose, template_vertices,
+        #                  self.shapedirs, self.posedirs,
+        #                  self.J_regressor, self.parents,
+        #                  self.lbs_weights, dtype=self.dtype)
+        vertices, _ = blbs(shape_params, expression_params, full_pose, template_vertices,
                           self.shapedirs, self.posedirs,
                           self.J_regressor, self.parents,
                           self.lbs_weights, dtype=self.dtype)
