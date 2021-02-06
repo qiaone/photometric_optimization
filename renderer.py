@@ -4,15 +4,18 @@ Copyright (c) 2020, Yao Feng
 All rights reserved.
 """
 import numpy as np
+import torchvision
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from skimage.io import imread
 from pytorch3d.structures import Meshes
+import pytorch3d.transforms
 from pytorch3d.io import load_obj
 from pytorch3d.renderer.mesh import rasterize_meshes
 import util
 import pdb
+import cv2
 
 
 class Pytorch3dRasterizer(nn.Module):
@@ -333,3 +336,108 @@ class Renderer(nn.Module):
         '''
         util.save_obj(filename, vertices, self.faces[0], textures=textures, uvcoords=self.raw_uvcoords[0],
                           uvfaces=self.uvfaces[0])
+
+class ImageRenderer(nn.Module):
+    def __init__(self, image_size, obj_filename, uv_size=256, config=None):
+        super(ImageRenderer, self).__init__()
+        self.image_size = image_size
+        self.uv_size = uv_size
+        verts, faces, aux = load_obj(obj_filename)
+        faces = faces.verts_idx[None, ...]
+        if config is not None:
+            _tp = np.load(config.trim_path, allow_pickle=True)
+            tp = {}
+            for k in _tp.keys():
+                tp[k] = torch.LongTensor(_tp[k])
+            #uvcoords = uvcoords[:,tp['idx_verts']]
+            faces = tp['map_verts'][faces[:,tp['idx_faces']]]
+        self.rasterizer = Pytorch3dRasterizer(image_size)
+        # trim more
+        #_tp = np.load("./data/trim_verts_face_half.npz", allow_pickle=True)
+        #tp = {}
+        #for k in _tp.keys():
+        #    tp[k] = torch.LongTensor(_tp[k])
+        ##uvcoords = uvcoords[:,tp['idx_verts']]
+        #faces = tp['map_verts'][faces[:,tp['idx_faces']]]
+        #self.tp = tp
+
+        # faces
+        self.register_buffer('faces', faces)
+
+    def forward(self, vertices, transformed_vertices, images):
+        #transformed_vertices = transformed_vertices[:, self.tp['idx_verts']]
+        transformed_vertices[:, :, 2] = -transformed_vertices[:, :, 2]+10# - 10#+ 10
+        batch_size = vertices.shape[0]
+        ## rasterizer near 0 far 100. move mesh so minz larger than 0
+        uvcoords = transformed_vertices.clone()
+        #uvcoords[:, :, 2] = uvcoords[:, :, 2] + 10
+        # Attributes
+        uvcoords = torch.cat([uvcoords[:,:,:2], uvcoords[:, :, 0:1] * 0. + 1.], -1)  # [bz, ntv, 3]
+        #uvcoords = uvcoords * 2 - 1
+        face_vertices = util.face_vertices(uvcoords, self.faces.expand(batch_size, -1, -1))
+        # render
+        attributes = face_vertices.detach()
+        # import ipdb;ipdb.set_trace()
+        pi = 3.141592653
+        angles = torch.Tensor([0, 30, 0])[None,...]/180.0 * pi
+        R = pytorch3d.transforms.euler_angles_to_matrix(angles, 'XYZ')
+        transformed_vertices = transformed_vertices@R
+        rendering = self.rasterizer(transformed_vertices, self.faces.expand(batch_size, -1, -1), attributes)
+
+        alpha_images = rendering[:, -1, :, :][:, None, :, :].detach()
+
+        # albedo
+        uvcoords_images = rendering[:, :3, :, :]
+        grid = (uvcoords_images).permute(0, 2, 3, 1)[:, :, :, :2]
+
+        albedo_images = F.grid_sample(images, grid, align_corners=False)
+        return {'albedo_images':albedo_images}
+
+
+
+if __name__ == "__main__":
+    import util
+    from conf.flame import config
+    config = util.dict2obj(config)
+
+    param = np.load("./test_results/00001.npy", allow_pickle=True)[()]
+    trans_vertices = torch.Tensor(param['verts'])
+    vertices = torch.Tensor(param['verts0'])
+    albedos = torch.Tensor(param['albedos'])
+    landmarks3d = torch.Tensor(param['land3d'])
+    lights = torch.Tensor(param['lit'])
+    images = []
+    image = cv2.resize(cv2.imread("./FFHQ/00001.png"), 
+            (config.cropped_size, config.cropped_size)).astype(np.float32) / 255.
+    image = image[:, :, [2, 1, 0]].transpose(2, 0, 1)
+    images.append(torch.from_numpy(image[None, :, :, :]))
+    images = torch.cat(images, dim=0)
+
+    mesh_file = './data/head_template_mesh.obj'
+    #render = Renderer(config.image_size, obj_filename=mesh_file, config=config)
+    render = ImageRenderer(config.image_size, obj_filename=mesh_file, config=config)
+
+    #ops = render(vertices, trans_vertices, albedos, lights)
+    ops = render(vertices, trans_vertices, images)
+
+    images = F.interpolate(images, [config.image_size, config.image_size])
+    grids = {}
+    visind = range(1)  # [0]
+    grids['images'] = torchvision.utils.make_grid(images[visind]).detach().cpu()
+    grids['landmarks3d'] = torchvision.utils.make_grid(
+        util.tensor_vis_landmarks(images[visind], landmarks3d[visind]))
+    grids['albedoimage'] = torchvision.utils.make_grid(
+        (ops['albedo_images'])[visind].detach().cpu())
+    pi = 3.141592653
+    angles = torch.Tensor([0, -30, 0])[None,...]/180.0 * pi
+    R = pytorch3d.transforms.euler_angles_to_matrix(angles, 'XYZ')
+    transformed_land = landmarks3d@R
+    grids['landmarks3d_rot'] = torchvision.utils.make_grid(
+        util.tensor_vis_landmarks(ops['albedo_images'][visind], transformed_land[visind]))
+
+    grid = torch.cat(list(grids.values()), 1)
+    grid_image = (grid.numpy().transpose(1, 2, 0).copy() * 255)[:, :, [2, 1, 0]]
+    grid_image = np.minimum(np.maximum(grid_image, 0), 255).astype(np.uint8)
+
+    cv2.imwrite('debug.jpg', grid_image)
+
