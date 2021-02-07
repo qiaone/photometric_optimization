@@ -49,7 +49,7 @@ class PhotometricFitting(object):
         tex = nn.Parameter(torch.zeros(bz, self.config.tex_params).float().to(self.device))
         exp = nn.Parameter(torch.zeros(bz, self.config.expression_params).float().to(self.device))
         pose = nn.Parameter(torch.zeros(bz, self.config.pose_params).float().to(self.device))
-        cam = torch.zeros(bz, self.config.camera_params); cam[:, 0] = self.config.cam_prior
+        cam = torch.zeros(bz, self.config.camera_params); cam[:, 3] = self.config.cam_prior
         cam = nn.Parameter(cam.float().to(self.device))
         lights = nn.Parameter(torch.zeros(bz, 9, 3).float().to(self.device))
         e_opt = torch.optim.Adam(
@@ -69,8 +69,8 @@ class PhotometricFitting(object):
         # this is due to the non-differentiable attribute of contour landmarks trajectory
         for k in range(200):
             losses = {}
-            p, e, s = self.config.prep_param(pose, exp, shape)
-            vertices, landmarks2d, landmarks3d = self.flame(shape_params=s, expression_params=e, pose_params=p)
+            p, e, s, c = self.config.prep_param(pose, exp, shape, cam)
+            vertices, landmarks2d, landmarks3d = self.flame(shape_params=s, expression_params=e, pose_params=p, cam_params=c)
             trans_vertices = util.batch_orth_proj(vertices, cam);
             trans_vertices[..., 1:] = - trans_vertices[..., 1:]
             landmarks2d = util.batch_orth_proj(landmarks2d, cam);
@@ -87,7 +87,7 @@ class PhotometricFitting(object):
             e_opt_rigid.zero_grad()
             all_loss.backward()
             e_opt_rigid.step()
-            self.config.post_param(pose, exp, shape)
+            self.config.post_param(pose, exp, shape, cam)
 
             loss_info = '----iter: {}, time: {}\n'.format(k, datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S'))
             for key in losses.keys():
@@ -114,8 +114,8 @@ class PhotometricFitting(object):
         # non-rigid fitting of all the parameters with 68 face landmarks, photometric loss and regularization terms.
         for k in range(200, 1000):
             losses = {}
-            p, e, s = self.config.prep_param(pose, exp, shape)
-            vertices, landmarks2d, landmarks3d = self.flame(shape_params=s, expression_params=e, pose_params=p)
+            p, e, s, c = self.config.prep_param(pose, exp, shape, cam)
+            vertices, landmarks2d, landmarks3d = self.flame(shape_params=s, expression_params=e, pose_params=p, cam_params=c)
             trans_vertices = util.batch_orth_proj(vertices, cam);
             trans_vertices[..., 1:] = - trans_vertices[..., 1:]
             landmarks2d = util.batch_orth_proj(landmarks2d, cam);
@@ -141,7 +141,7 @@ class PhotometricFitting(object):
             e_opt.zero_grad()
             all_loss.backward()
             e_opt.step()
-            self.config.post_param(pose, exp, shape)
+            self.config.post_param(pose, exp, shape, cam)
 
             loss_info = '----iter: {}, time: {}\n'.format(k, datetime.datetime.now().strftime('%Y-%m-%d-%H:%M:%S'))
             for key in losses.keys():
@@ -182,6 +182,7 @@ class PhotometricFitting(object):
             'pose': pose.detach().cpu().numpy(),
             'cam': cam.detach().cpu().numpy(),
             'verts': trans_vertices.detach().cpu().numpy(),
+            'verts0': vertices.detach().cpu().numpy(),
             'albedos':albedos.detach().cpu().numpy(),
             'tex': tex.detach().cpu().numpy(),
             'lit': lights.detach().cpu().numpy()

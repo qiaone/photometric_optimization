@@ -7,6 +7,7 @@ import os
 from scipy.ndimage import morphology
 from skimage.io import imsave
 import cv2
+import pytorch3d.transforms
 import pdb
 
 
@@ -76,7 +77,10 @@ def batch_orth_proj(X, camera):
     '''
         X is N x num_points x 3
     '''
-    camera = camera.clone().view(-1, 1, 3)
+    angles = camera[:,:3]
+    R = pytorch3d.transforms.euler_angles_to_matrix(angles, "XYZ")
+    X = X@R
+    camera = camera[:,3:].clone().view(-1, 1, 3)
     X_trans = X[:, :, :2] + camera[:, :, 1:]
     X_trans = torch.cat([X_trans, X[:, :, 2:]], 2)
     shape = X_trans.shape

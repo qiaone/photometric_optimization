@@ -7,11 +7,12 @@ All rights reserved.
 import pdb
 import torch
 import torch.nn as nn
+import pytorch3d.transforms
 import numpy as np
 import pickle
 import torch.nn.functional as F
 
-from lbs import batch_rodrigues, vertices2landmarks
+from models.lbs import batch_rodrigues, vertices2landmarks
 
 def to_tensor(array, dtype=torch.float32):
     if 'torch.tensor' not in str(type(array)):
@@ -109,7 +110,7 @@ class FLAME(nn.Module):
             curr_idx = self.parents[curr_idx]
         self.register_buffer('neck_kin_chain', torch.stack(neck_kin_chain))
         
-    def _find_dynamic_lmk_idx_and_bcoords(self, pose, dynamic_lmk_faces_idx,
+    def _find_dynamic_lmk_idx_and_bcoords(self, cam, dynamic_lmk_faces_idx,
                                           dynamic_lmk_b_coords,
                                           neck_kin_chain, dtype=torch.float32):
         """
@@ -125,20 +126,26 @@ class FLAME(nn.Module):
                 The contour face indexes and the corresponding barycentric weights
         """
 
-        batch_size = pose.shape[0]
+        batch_size = cam.shape[0]
 
-        aa_pose = torch.index_select(pose.view(batch_size, -1, 3), 1,
-                                     neck_kin_chain)
-        rot_mats = batch_rodrigues(
-            aa_pose.view(-1, 3), dtype=dtype).view(batch_size, -1, 3, 3)
+        #aa_pose = torch.index_select(pose.view(batch_size, -1, 3), 1,
+        #                             neck_kin_chain)
+        #rot_mats = batch_rodrigues(
+        #    aa_pose.view(-1, 3), dtype=dtype).view(batch_size, -1, 3, 3)
 
-        rel_rot_mat = torch.eye(3, device=pose.device,
-                                dtype=dtype).unsqueeze_(dim=0).expand(batch_size, -1, -1)
-        for idx in range(len(neck_kin_chain)):
-            rel_rot_mat = torch.bmm(rot_mats[:, idx], rel_rot_mat)
+        #rel_rot_mat = torch.eye(3, device=pose.device,
+        #                        dtype=dtype).unsqueeze_(dim=0).expand(batch_size, -1, -1)
+        #for idx in range(len(neck_kin_chain)):
+        #    rel_rot_mat = torch.bmm(rot_mats[:, idx], rel_rot_mat)
+        #pdb.set_trace()
 
+        #y_rot_angle = torch.round(
+        #    torch.clamp(rot_mat_to_euler(rel_rot_mat) * 180.0 / np.pi,
+        #                max=39)).to(dtype=torch.long)
+
+        angles = cam[:,:3]
         y_rot_angle = torch.round(
-            torch.clamp(rot_mat_to_euler(rel_rot_mat) * 180.0 / np.pi,
+                torch.clamp(torch.abs(angles[:,1]) * 180.0 / np.pi,
                         max=39)).to(dtype=torch.long)
 
         neg_mask = y_rot_angle.lt(0).to(dtype=torch.long)
@@ -191,7 +198,7 @@ class FLAME(nn.Module):
                                        self.full_lmk_bary_coords.repeat(vertices.shape[0], 1, 1))
         return landmarks3d
 
-    def forward(self, shape_params=None, expression_params=None, pose_params=None, eye_pose_params=None):
+    def forward(self, shape_params=None, expression_params=None, pose_params=None, eye_pose_params=None, cam_params=None):
         """
             Input:
                 shape_params: N X number of shape parameters
@@ -204,7 +211,8 @@ class FLAME(nn.Module):
         batch_size = shape_params.shape[0]
         if eye_pose_params is None:
             eye_pose_params = self.eye_pose.expand(batch_size, -1)
-        full_pose = torch.cat([pose_params[:, :3], self.neck_pose.expand(batch_size, -1), pose_params[:, 3:], eye_pose_params], dim=1)
+        pose0 = torch.zeros_like(pose_params[:,:3])
+        full_pose = torch.cat([pose0, self.neck_pose.expand(batch_size, -1), pose_params, eye_pose_params], dim=1)
         template_vertices = self.v_template.unsqueeze(0).expand(batch_size, -1, -1)
 
         # import ipdb; ipdb.set_trace()
@@ -221,7 +229,7 @@ class FLAME(nn.Module):
         lmk_bary_coords = self.lmk_bary_coords.unsqueeze(dim=0).expand(batch_size, -1, -1)
         
         dyn_lmk_faces_idx, dyn_lmk_bary_coords = self._find_dynamic_lmk_idx_and_bcoords(
-            full_pose, self.dynamic_lmk_faces_idx,
+            cam_params, self.dynamic_lmk_faces_idx,
             self.dynamic_lmk_bary_coords,
             self.neck_kin_chain, dtype=self.dtype)
         lmk_faces_idx = torch.cat([dyn_lmk_faces_idx, lmk_faces_idx], 1)

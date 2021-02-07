@@ -1,9 +1,9 @@
 from models.lbs import lbs
 
-def prep_param(pose, exp, shape):
-    return pose, exp, shape
+def prep_param(pose, exp, shape, cam):
+    return pose, exp, shape, cam
 
-def post_param(pose, exp, shape):
+def post_param(pose, exp, shape, cam):
     pass
 
 config = {
@@ -13,10 +13,10 @@ config = {
     'cam_prior': 5,
     'flame_lmk_embedding_path': './data/landmark_embedding.npy',
     'tex_space_path': '../FLAME_texture.npz',  # acquire it from FLAME project page
-    'camera_params': 3,
+    'camera_params': 6,
     'shape_params': 100,
     'expression_params': 50,
-    'pose_params': 6,
+    'pose_params': 3,
     'tex_params': 50,
     'use_face_contour': True,
 
