@@ -1,6 +1,8 @@
 from models.lbs import lbs
 
 def prep_param(pose, exp, shape, cam):
+    bsize = pose.size(0)
+    shape = shape.expand(bsize, -1)
     return pose, exp, shape, cam
 
 def post_param(pose, exp, shape, cam):

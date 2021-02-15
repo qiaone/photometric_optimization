@@ -243,7 +243,7 @@ def plot_kpts(image, kpts, color = 'r'):
     elif color == 'b':
         c = (255, 0, 0)
     image = image.copy()
-    kpts = kpts.copy()
+    kpts = kpts.copy().astype(np.int)
 
     for i in range(kpts.shape[0]):
         st = kpts[i, :2]

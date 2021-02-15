@@ -14,6 +14,7 @@ import torch.nn.functional as F
 
 from models.lbs import batch_rodrigues, vertices2landmarks
 
+
 def to_tensor(array, dtype=torch.float32):
     if 'torch.tensor' not in str(type(array)):
         return torch.tensor(array, dtype=dtype)

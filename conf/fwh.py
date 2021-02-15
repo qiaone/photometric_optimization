@@ -4,6 +4,8 @@ import torch
 
 def prep_param(pose, exp, shape, cam):
     #pose = torch.cat((pose, torch.zeros_like(pose)), 1)
+    bsize = pose.size(0)
+    shape = shape.expand(bsize, -1)
     exp = torch.cat((torch.ones_like(exp[:,:1]), exp), 1)
     return pose, exp, shape, cam
 
@@ -39,7 +41,7 @@ config = {
     'w_pho': 8,
     'w_lmks': 1,
     'w_shape_reg': 1e-1,
-    'w_expr_reg': 1e-2,
+    'w_expr_reg': 5e-2,
     'w_pose_reg': 0,
     'trim_path': "./data/trim_verts_face.npz",
     'param2verts': blbs,

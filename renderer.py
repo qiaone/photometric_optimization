@@ -6,6 +6,7 @@ All rights reserved.
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from skimage.io import imread
 from pytorch3d.structures import Meshes
 import pytorch3d.transforms

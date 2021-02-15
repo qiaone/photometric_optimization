@@ -150,8 +150,11 @@ def blbs(shape_params, expression_params, pose, v_template, shapedirs, posedirs,
     # Add shape contribution
     #v_shaped = v_template + blend_shapes(betas, shapedirs)
     w_ex = mode_dot(shapedirs, shape_params,2)
-    v_shaped = mode_dot(w_ex, expression_params,1)
-    verts = v_shaped.squeeze(1).view(-1, 3, batch_size).transpose(1,2).transpose(0,1)
+    w_ex = w_ex.transpose(1,2).transpose(0,1)
+    v_shaped = w_ex@(expression_params[...,None])
+    verts = v_shaped.view(batch_size, -1, 3)
+    #v_shaped = mode_dot(w_ex, expression_params,1)
+    #verts = v_shaped.squeeze(1).view(-1, 3, batch_size).transpose(1,2).transpose(0,1)
     return verts, None
 
 
