@@ -17,11 +17,16 @@
 from __future__ import absolute_import
 from __future__ import print_function
 from __future__ import division
+import pdb
 
 import numpy as np
 
+import pytorch3d.transforms
 import torch
 import torch.nn.functional as F
+import tensorly
+from tensorly.tenalg import mode_dot
+tensorly.set_backend('pytorch')
 
 def rot_mat_to_euler(rot_mats):
     # Calculates rotation matrix to euler angles
@@ -137,8 +142,23 @@ def vertices2landmarks(vertices, faces, lmk_faces_idx, lmk_bary_coords):
     landmarks = torch.einsum('blfi,blf->bli', [lmk_vertices, lmk_bary_coords])
     return landmarks
 
+def blbs(shape_params, expression_params, pose, v_template, shapedirs, posedirs, J_regressor, parents,
+        lbs_weights, pose2rot=True, dtype=torch.float32):
+    batch_size = max(shape_params.shape[0], expression_params.shape[0], pose.shape[0])
+    NV = v_template.size(1)
+    device = shape_params.device
+    # Add shape contribution
+    #v_shaped = v_template + blend_shapes(betas, shapedirs)
+    w_ex = mode_dot(shapedirs, shape_params,2)
+    w_ex = w_ex.transpose(1,2).transpose(0,1)
+    v_shaped = w_ex@(expression_params[...,None])
+    verts = v_shaped.view(batch_size, -1, 3)
+    #v_shaped = mode_dot(w_ex, expression_params,1)
+    #verts = v_shaped.squeeze(1).view(-1, 3, batch_size).transpose(1,2).transpose(0,1)
+    return verts, None
 
-def lbs(betas, pose, v_template, shapedirs, posedirs, J_regressor, parents,
+
+def lbs(shape_params, expression_params, pose, v_template, shapedirs, posedirs, J_regressor, parents,
         lbs_weights, pose2rot=True, dtype=torch.float32):
     ''' Performs Linear Blend Skinning with the given shape and pose parameters
 
@@ -177,6 +197,7 @@ def lbs(betas, pose, v_template, shapedirs, posedirs, J_regressor, parents,
         joints: torch.tensor BxJx3
             The joints of the model
     '''
+    betas = torch.cat([shape_params, expression_params], dim=1)
 
     batch_size = max(betas.shape[0], pose.shape[0])
     device = betas.device
